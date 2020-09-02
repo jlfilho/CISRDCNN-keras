@@ -178,7 +178,13 @@ class DataLoader(Sequence):
         return int(self.total_imgs / float(self.batch_size))
     
     def __getitem__(self, idx):
-        return self.load_batch(idx=idx)        
+        return self.load_batch(idx=idx)   
+
+    def compression_artefacts(self,img=None,qf=10):
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), qf]
+        _, encimg = cv2.imencode('.jpg', img, encode_param)
+        decimg = cv2.imdecode(encimg,cv2.IMREAD_COLOR)      
+        return decimg
 
 
     def load_batch(self,idx=0, img_paths=None, training=True, bicubic=False):
@@ -324,8 +330,9 @@ class DataLoader(Sequence):
                         break   
 
                     lr_shape = (int(img_hr.shape[1]/self.scale), int(img_hr.shape[0]/self.scale))  
-                    img_lr = cv2.resize(cv2.GaussianBlur(img_hr,(6,6),0),lr_shape, interpolation = cv2.INTER_CUBIC)
+                    #img_lr = cv2.resize(cv2.GaussianBlur(img_hr,(5,5),cv2.BORDER_DEFAULT),lr_shape, interpolation = cv2.INTER_CUBIC)
                     #img_lr = cv2.resize(cv2.medianBlur(img_hr,5),lr_shape, interpolation = cv2.INTER_CUBIC)
+                    img_lr = cv2.resize(self.compression_artefacts(img_hr),lr_shape, interpolation = cv2.INTER_CUBIC)
 
 
                     # For LR, do bicubic downsampling

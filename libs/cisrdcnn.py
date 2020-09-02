@@ -77,22 +77,27 @@ class CISRDCNN():
             metrics=[psnr]
         )
 
-    def build_model(self,k1=6,k2=10,k3=10):
-        inputs = Input(shape=(None, None, self.channels))
-        x=inputs
-        for i in range(k1-1):
-            x = Conv2D(filters= 64, kernel_size = (3,3), strides=1,padding='same')(x)
-            x =  BatchNormalization()(x)
-            x = ReLU()(x)
-        x = Conv2D(filters= self.channels, kernel_size = (3,3), strides=1, padding='same', name='K1')(x)
-        print(x.shape)
-        x = ReLU()(x)
+    def build_model(self,k1=20,k2=10,k3=10):
 
-        x = Add()([x, inputs])
-        #x = Concatenate()([x, inputs])
+        
+        def DBCNN(input):
+            x=input
+            for i in range(k1-1):
+                x = Conv2D(filters= 64, kernel_size = (3,3), strides=1,padding='same')(x)
+                x =  BatchNormalization()(x)
+                x = ReLU()(x)
+            x = Conv2D(filters= self.channels, kernel_size = (3,3), strides=1, padding='same', name='K1')(x)
+            print(x.shape)
+            x = ReLU()(x)
+            x = Add()([x, input])
+            return x
+
+        inputs = Input(shape=(None, None, self.channels))
+        x = DBCNN(inputs)
+
+
         model = Model(inputs=inputs, outputs=x)
         logging.debug(model.summary())
-        print(x.shape)
         return model
 
     def train(self,
