@@ -323,17 +323,22 @@ class DataLoader(Sequence):
                     if img_paths is not None and len(imgs_hr) == len(img_paths):
                         break   
 
-                    # For LR, do bicubic downsampling
                     lr_shape = (int(img_hr.shape[1]/self.scale), int(img_hr.shape[0]/self.scale))  
-                    hr_shape = (img_hr.shape[1], img_hr.shape[0]) 
+                    img_lr = cv2.resize(cv2.GaussianBlur(img_hr,(6,6),0),lr_shape, interpolation = cv2.INTER_CUBIC)
+                    #img_lr = cv2.resize(cv2.medianBlur(img_hr,5),lr_shape, interpolation = cv2.INTER_CUBIC)
+
+
+                    # For LR, do bicubic downsampling
+                    #lr_shape = (int(img_hr.shape[1]/self.scale), int(img_hr.shape[0]/self.scale))  
+                    #hr_shape = (img_hr.shape[1], img_hr.shape[0]) 
                     
                     # img_lr = Image.fromarray(img_hr.astype(np.uint8))
                     # method = Image.BICUBIC if bicubic else choice(self.options)
                     # img_lr = img_lr.resize(lr_shape, method)
                     # img_lr = np.array(img_lr.resize(hr_shape, method))
                     
-                    img_lr = cv2.resize(img_hr,lr_shape, interpolation = cv2.INTER_CUBIC)
-                    img_lr = cv2.resize(img_lr,hr_shape, interpolation = cv2.INTER_CUBIC)
+                    #img_lr = cv2.resize(img_hr,lr_shape, interpolation = cv2.INTER_CUBIC)
+                    #img_lr = cv2.resize(img_lr,hr_shape, interpolation = cv2.INTER_CUBIC)
                     
                     #img_lr = imresize(img_hr, lr_shape, interp='bicubic')
                     #img_lr = imresize(img_lr, hr_shape, interp='bicubic')
@@ -345,7 +350,8 @@ class DataLoader(Sequence):
 
                     # Store images
                     #print(img_hr[6:-6,6:-6,:self.channels].shape,img_lr[:,:,:self.channels].shape)
-                    imgs_hr.append(img_hr[6:-6,6:-6,:self.channels])
+                    #imgs_hr.append(img_hr[6:-6,6:-6,:self.channels])
+                    imgs_hr.append(img_hr[:,:,:self.channels])
                     imgs_lr.append(img_lr[:,:,:self.channels])
                 
             except Exception as e:
@@ -402,7 +408,8 @@ def plot_test_images(model, loader, datapath_test, test_output, epoch, name='SRC
                 imgs_sr = [cv2.cvtColor(loader.unscale_hr_imgs(img).astype(np.uint8), cv2.COLOR_YCrCb2BGR) for img in imgs_sr]
                 
             else:
-                imgs_lr = [loader.unscale_lr_imgs(img[6:-6,6:-6,:channels]).astype(np.uint8) for img in imgs_lr]
+                #imgs_lr = [loader.unscale_lr_imgs(img[6:-6,6:-6,:channels]).astype(np.uint8) for img in imgs_lr]
+                imgs_lr = [loader.unscale_lr_imgs(img[:,:,:channels]).astype(np.uint8) for img in imgs_lr]
                 imgs_hr = [loader.unscale_hr_imgs(img).astype(np.uint8) for img in imgs_hr]
                 imgs_sr = [loader.unscale_hr_imgs(img).astype(np.uint8) for img in imgs_sr]
         

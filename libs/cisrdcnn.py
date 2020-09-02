@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras import Input
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, ReLU
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, ReLU, BatchNormalization, Add, Concatenate
 
 from tensorflow.keras.optimizers import SGD, Adam
 from tensorflow.keras.models import Model
@@ -35,7 +35,7 @@ class CISRDCNN():
         self.width_lr = width_lr
 
         # High-resolution image dimensions
-        if upscaling_factor not in [2, 4, 8]:
+        if upscaling_factor not in [1, 2, 4, 8]:
             raise ValueError(
                 'Upscaling factor must be either 2, 4, or 8. You chose {}'.format(upscaling_factor))
         self.upscaling_factor = upscaling_factor
@@ -77,26 +77,22 @@ class CISRDCNN():
             metrics=[psnr]
         )
 
-    def build_model(self):
-
+    def build_model(self,k1=6,k2=10,k3=10):
         inputs = Input(shape=(None, None, self.channels))
-          
-        x = Conv2D(filters= 64, kernel_size = (9,9), strides=1, 
-            kernel_initializer=RandomNormal(mean=0.0, stddev=0.001, seed=None),bias_initializer='zeros',
-            padding = "valid", use_bias=True, name='conv1')(inputs)
+        x=inputs
+        for i in range(k1-1):
+            x = Conv2D(filters= 64, kernel_size = (3,3), strides=1,padding='same')(x)
+            x =  BatchNormalization()(x)
+            x = ReLU()(x)
+        x = Conv2D(filters= self.channels, kernel_size = (3,3), strides=1, padding='same', name='K1')(x)
+        print(x.shape)
         x = ReLU()(x)
 
-        x = Conv2D(filters= 32, kernel_size = (1,1), strides=1, 
-            kernel_initializer=RandomNormal(mean=0.0, stddev=0.001, seed=None),bias_initializer='zeros',
-            padding = "valid", use_bias=True, name='conv2')(x)
-        x = ReLU()(x)
-
-        x = Conv2D(filters= self.channels, kernel_size = (5,5), strides=1, 
-            kernel_initializer=RandomNormal(mean=0.0, stddev=0.001, seed=None),bias_initializer='zeros',
-            padding = "valid", use_bias=True, name='conv3')(x)
-        
+        x = Add()([x, inputs])
+        #x = Concatenate()([x, inputs])
         model = Model(inputs=inputs, outputs=x)
         logging.debug(model.summary())
+        print(x.shape)
         return model
 
     def train(self,
@@ -107,7 +103,7 @@ class CISRDCNN():
             crops_per_image=4,
             print_frequency=5,
             log_tensorboard_update_freq=10,
-            workers=4,
+            workers=1,
             max_queue_size=5,
             model_name='CISRDCNN',
             media_type='i', 
@@ -208,7 +204,7 @@ class CISRDCNN():
 
         #callbacks.append(TQDMCallback())
 
-        self.model.fit_generator(
+        self.model.fit(
             train_loader,
             steps_per_epoch=steps_per_epoch,
             epochs=epochs,
@@ -216,7 +212,7 @@ class CISRDCNN():
             validation_steps=steps_per_validation,
             callbacks=callbacks,
             shuffle=True,
-            use_multiprocessing=workers>1,
+            use_multiprocessing=False,
             workers=workers
         )
 
@@ -257,7 +253,7 @@ def main():
 
     # Instantiate the TSRGAN object
     logging.info(">> Creating the CISRDCNN network")
-    cisrdcnn = CISRDCNN(height_lr=16, width_lr=16,lr=1e-4,upscaling_factor=2,channels=3,colorspace = 'RGB')
+    cisrdcnn = CISRDCNN(height_lr=16, width_lr=16,lr=1e-3,upscaling_factor=1,channels=3,colorspace = 'RGB')
     #cisrdcnn.load_weights(weights='../model/CISRDCNN_v1_2X.h5')
 
 
@@ -294,17 +290,17 @@ def main():
     cisrdcnn.train(
             epochs=10000,
             batch_size=64,
-            steps_per_epoch=100,
-            steps_per_validation=10,
+            steps_per_epoch=10,
+            steps_per_validation=5,
             crops_per_image=4,
             print_frequency=5,
             log_tensorboard_update_freq=10,
-            workers=2,
-            max_queue_size=11,
+            workers=1,
+            max_queue_size=10,
             model_name='CISRDCNN',
             datapath_train='../../../Documents/data/train_large/data_large/', 
-            datapath_validation='../../data/val_large', 
-            datapath_test='../../data/benchmarks/Set5',
+            datapath_validation='../../data/val_large/', 
+            datapath_test='../../data/benchmarks/Set5/',
             log_weight_path='../model/', 
             log_tensorboard_path='../logs/',
             log_test_path='../test/'
