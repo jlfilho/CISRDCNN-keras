@@ -54,10 +54,10 @@ class CISRDCNN():
         self.lr = lr
 
         self.dbcnn = self.build_dbcnn()
-        self.compile_dbcnn(self.dbcnn)
+        self.compile_model(self.dbcnn)
 
         self.uscnn = self.build_uscnn()
-        self.compile_uscnn(self.uscnn)
+        self.compile_model(self.uscnn)
 
 
     def save_weights(self, filepath):
@@ -73,7 +73,7 @@ class CISRDCNN():
             self.dbcnn.load_weights(weights, **kwargs)
         
     
-    def compile_dbcnn(self, model):
+    def compile_model(self, model):
         """Compile the DBCNN with appropriate optimizer"""
         
         model.compile(
@@ -82,14 +82,6 @@ class CISRDCNN():
             metrics=[psnr]
         )
     
-    def compile_uscnn(self, model):
-        """Compile the DBCNN with appropriate optimizer"""
-        
-        model.compile(
-            loss=self.loss,
-            optimizer= SGD(lr=self.lr, momentum=0.9, decay=1e-6, nesterov=True), #Adam(lr=self.lr,beta_1=0.9, beta_2=0.999), 
-            metrics=[psnr]
-        )
 
     def build_dbcnn(self,k1=20):
 
@@ -121,10 +113,9 @@ class CISRDCNN():
                 x = ReLU()(x)
             x = UpSampling2D(size=(self.upscaling_factor, self.upscaling_factor),interpolation="nearest")(x)
             x = Conv2D(filters= self.channels, kernel_size = (9,9), strides=1,padding='same')(x)
-            #x = Conv2DTranspose(filters= self.channels, kernel_size = (9,9), strides=1, padding='valid', name='K2')(x)
             x = ReLU()(x)
             return x
-        inputs = Input(shape=(16, 16, self.channels))
+        inputs = Input(shape=(None, None, self.channels))
         x = USCNN(inputs)
 
         model = Model(inputs=inputs, outputs=x)
@@ -466,7 +457,7 @@ def main():
 
     cisrdcnn.train_uscnn(
             epochs=10000,
-            batch_size=64,
+            batch_size=32,
             steps_per_epoch=10,
             steps_per_validation=5,
             crops_per_image=4,
