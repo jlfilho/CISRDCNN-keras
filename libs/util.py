@@ -377,7 +377,7 @@ class DataLoader(Sequence):
         return imgs_lr, imgs_hr
 
 
-def plot_test_images(model, loader, datapath_test, test_output, epoch, name='SRCNN', channels = 3,colorspace='RGB'):
+def plot_test_images(model, loader, datapath_test, test_output, epoch, name='SRGAN', channels = 3,colorspace='RGB'):
     
     try:   
         # Get the location of test images
@@ -387,7 +387,8 @@ def plot_test_images(model, loader, datapath_test, test_output, epoch, name='SRC
         imgs_lr, imgs_hr = loader.load_batch(img_paths=test_images, training=False, bicubic=True)
         # Create super resolution and bicubic interpolation images
         imgs_sr = []
-        srcnn_psnr = []
+        imgs_bi = []
+        srgan_psnr = []
         bi_psnr = []
         for i in range(len(test_images)):
             
@@ -398,60 +399,58 @@ def plot_test_images(model, loader, datapath_test, test_output, epoch, name='SRC
                     ),
                     axis=0
                 )
-            #pre[pre[:] > 255] = 255
-            #pre[pre[:] < 0] = 0
-            # SRCNN prediction
             imgs_sr.append(pre)
-
+ 
+        
         # Unscale colors values
         if channels == 1:
-            imgs_lr = [loader.unscale_lr_imgs(img[6:-6,6:-6,0]).astype(np.uint8) for img in imgs_lr]
+            imgs_lr = [loader.unscale_lr_imgs(img[:,:,0]).astype(np.uint8) for img in imgs_lr]
             imgs_hr = [loader.unscale_hr_imgs(img[:,:,0]).astype(np.uint8) for img in imgs_hr]
             imgs_sr = [loader.unscale_hr_imgs(img[:,:,0]).astype(np.uint8) for img in imgs_sr]
         else:
             if(colorspace == 'YCbCr'):
-                imgs_lr = [cv2.cvtColor(loader.unscale_lr_imgs(img[6:-6,6:-6,:channels]).astype(np.uint8), cv2.COLOR_YCrCb2BGR) for img in imgs_lr]
+                imgs_lr = [cv2.cvtColor(loader.unscale_lr_imgs(img).astype(np.uint8), cv2.COLOR_YCrCb2BGR) for img in imgs_lr]
                 imgs_hr = [cv2.cvtColor(loader.unscale_hr_imgs(img).astype(np.uint8), cv2.COLOR_YCrCb2BGR) for img in imgs_hr]
                 imgs_sr = [cv2.cvtColor(loader.unscale_hr_imgs(img).astype(np.uint8), cv2.COLOR_YCrCb2BGR) for img in imgs_sr]
                 
             else:
-                #imgs_lr = [loader.unscale_lr_imgs(img[6:-6,6:-6,:channels]).astype(np.uint8) for img in imgs_lr]
-                imgs_lr = [loader.unscale_lr_imgs(img[:,:,:channels]).astype(np.uint8) for img in imgs_lr]
+                imgs_lr = [loader.unscale_lr_imgs(img).astype(np.uint8) for img in imgs_lr]
                 imgs_hr = [loader.unscale_hr_imgs(img).astype(np.uint8) for img in imgs_hr]
                 imgs_sr = [loader.unscale_hr_imgs(img).astype(np.uint8) for img in imgs_sr]
-        
+	
         # Loop through images
         for img_hr, img_lr, img_sr, img_path in zip(imgs_hr, imgs_lr, imgs_sr, test_images):
-
             # Get the filename
             filename = os.path.basename(img_path).split(".")[0]
+            
+            # Bicubic upscale
+            hr_shape = (int(img_hr.shape[1]), int(img_hr.shape[0]))                      
+            img_bi = cv2.resize(img_lr,hr_shape, interpolation = cv2.INTER_CUBIC)
 	    
-	    
+
             # Images and titles
             images = {
-                'Bicubic': [img_lr, img_hr],  
+                'Low Resoluiton': [img_lr, img_hr],
+                'Bicubic': [img_bi, img_hr],  
                 name: [img_sr, img_hr], 
                 'Original': [img_hr,img_hr]
             }
-            #print(img_sr.shape,img_hr.shape)
-            srcnn_psnr.append(psnr(img_sr,img_hr,255.))
-            #print(img_lr.shape,img_hr.shape)
-            bi_psnr.append(psnr(img_lr,img_hr,255.))
-            
+            srgan_psnr.append(psnr(img_sr,img_hr,255.))
+            bi_psnr.append(psnr(img_bi,img_hr,255.))
             # Plot the images. Note: rescaling and using squeeze since we are getting batches of size 1                    
-            fig, axes = plt.subplots(1, 3, figsize=(40, 10))
+            fig, axes = plt.subplots(1, 4, figsize=(40, 10))
             for i, (title, img) in enumerate(images.items()):
                 axes[i].imshow(img[0])
                 axes[i].set_title("{} - {} {}".format(title, img[0].shape, ("- psnr: "+str(round(psnr(img[0],img[1],255.),2)) if (title == name or title == 'Bicubic' ) else " ")))
                 #axes[i].set_title("{} - {}".format(title, img.shape))
                 axes[i].axis('off')
-                
             plt.suptitle('{} - Epoch: {}'.format(filename, epoch))
+
             # Save directory                    
             savefile = os.path.join(test_output, "{}-Epoch{}.png".format(filename, epoch))
             fig.savefig(savefile)
             plt.close()
             gc.collect()
-        print('test srcnn psnr: {} - test bi psnr: {}'.format(np.mean(srcnn_psnr),np.mean(bi_psnr)))
+        print('test {} psnr: {} - test bi psnr: {}'.format(name,np.mean(srgan_psnr),np.mean(bi_psnr)))
     except Exception as e:
         print(e)

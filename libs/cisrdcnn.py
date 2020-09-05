@@ -28,7 +28,8 @@ class CISRDCNN():
                  height_lr=16, width_lr=16, channels=3,
                  upscaling_factor=4, lr = 1e-4,
                  training_mode=True,
-                 colorspace = 'RGB'
+                 colorspace = 'RGB',
+                 fulltrain = False
                  ):
 
         # Low-resolution image dimensions
@@ -59,6 +60,14 @@ class CISRDCNN():
         self.uscnn = self.build_uscnn()
         self.compile_model(self.uscnn)
 
+        self.qecnn = self.build_qecnn()
+        self.compile_model(self.qecnn)
+
+        
+        self.cisrdcnn = self.build_cisrdcnn(fulltrain=fulltrain)
+        self.compile_model(self.cisrdcnn)
+
+
 
     def save_weights(self, filepath):
         """Save the networks weights"""
@@ -75,7 +84,6 @@ class CISRDCNN():
     
     def compile_model(self, model):
         """Compile the DBCNN with appropriate optimizer"""
-        
         model.compile(
             loss=self.loss,
             optimizer= SGD(lr=self.lr, momentum=0.9, decay=1e-6, nesterov=True), #Adam(lr=self.lr,beta_1=0.9, beta_2=0.999), 
@@ -83,9 +91,7 @@ class CISRDCNN():
         )
     
 
-    def build_dbcnn(self,k1=20):
-
-        
+    def build_dbcnn(self,k1=20):    
         def DBCNN(input):
             x=input
             for i in range(k1-1):
@@ -100,13 +106,13 @@ class CISRDCNN():
         inputs = Input(shape=(None, None, self.channels))
         x = DBCNN(inputs)
 
-
-        model = Model(inputs=inputs, outputs=x)
+        model = Model(inputs=inputs, outputs=x,name="DBCNN")
         logging.debug(model.summary())
         return model
     
     def build_uscnn(self,k2=10):
-        def USCNN(x):
+        def USCNN(input):
+            x = input
             for i in range(k2-1):
                 x = Conv2D(filters= 64, kernel_size = (3,3), strides=1,padding='same')(x)
                 x =  BatchNormalization()(x)
@@ -118,9 +124,47 @@ class CISRDCNN():
         inputs = Input(shape=(None, None, self.channels))
         x = USCNN(inputs)
 
-        model = Model(inputs=inputs, outputs=x)
+        model = Model(inputs=inputs, outputs=x, name="USCNN")
         logging.debug(model.summary())
         return model
+
+    def build_qecnn(self,k3=20):    
+        def QECNN(input):
+            x=input
+            for i in range(k3-1):
+                x = Conv2D(filters= 64, kernel_size = (3,3), strides=1,padding='same')(x)
+                x =  BatchNormalization()(x)
+                x = ReLU()(x)
+            x = Conv2D(filters= self.channels, kernel_size = (3,3), strides=1, padding='same', name='K3')(x)
+            x = ReLU()(x)
+            x = Add()([x, input])
+            return x
+
+        inputs = Input(shape=(None, None, self.channels))
+        x = QECNN(inputs)
+
+        model = Model(inputs=inputs, outputs=x,name="GECNN")
+        logging.debug(model.summary())
+        return model
+    
+    def build_cisrdcnn(self,fulltrain=False):    
+        z = Input(shape=(None, None, self.channels))
+        y = self.dbcnn(z)
+        if fulltrain:
+            self.dbcnn.trainable = False
+            self.uscnn.trainable = False
+        else:
+            self.dbcnn.trainable = True
+            self.uscnn.trainable = True
+        x = self.uscnn(y)
+        
+        hr = self.qecnn(x)
+        
+        model = Model(inputs=z, outputs=hr,name="CISRDCNN")
+        logging.debug(model.summary())
+        return model
+    
+
 
     def train_dbcnn(self,
             epochs=50,
@@ -358,6 +402,124 @@ class CISRDCNN():
             workers=workers
         )
 
+    def train_cisrdcnn(self,
+            epochs=50,
+            batch_size=8,
+            steps_per_epoch=5,
+            steps_per_validation=5,
+            crops_per_image=4,
+            print_frequency=5,
+            log_tensorboard_update_freq=10,
+            workers=1,
+            max_queue_size=5,
+            model_name='CISRDCNN',
+            media_type='i', 
+            datapath_train='../../../videos_harmonic/MYANMAR_2160p/train/',
+            datapath_validation='../../../videos_harmonic/MYANMAR_2160p/validation/',
+            datapath_test='../../../videos_harmonic/MYANMAR_2160p/test/',
+            log_weight_path='../model/', 
+            log_tensorboard_path='../logs/',
+            log_test_path='../test/'
+        ):
+
+        # Create data loaders
+        
+        train_loader = DataLoader(
+            datapath_train, batch_size,
+            self.height_hr, self.width_hr,
+            self.upscaling_factor,
+            crops_per_image,
+            media_type,
+            self.channels,
+            self.colorspace
+        )
+        
+
+        validation_loader = None 
+        if datapath_validation is not None:
+            validation_loader = DataLoader(
+                datapath_validation, batch_size,
+                self.height_hr, self.width_hr,
+                self.upscaling_factor,
+                crops_per_image,
+                media_type,
+                self.channels,
+                self.colorspace
+        )
+
+        test_loader = None
+        if datapath_test is not None:
+            test_loader = DataLoader(
+                datapath_test, 1,
+                self.height_hr, self.width_hr,
+                self.upscaling_factor,
+                1,
+                media_type,
+                self.channels,
+                self.colorspace
+        )
+
+        # Callback: tensorboard
+        callbacks = []
+        if log_tensorboard_path:
+            tensorboard = TensorBoard(
+                log_dir=os.path.join(log_tensorboard_path, model_name),
+                histogram_freq=0,
+                write_graph=True,
+                update_freq=log_tensorboard_update_freq
+            )
+            callbacks.append(tensorboard)
+        else:
+            print(">> Not logging to tensorboard since no log_tensorboard_path is set")
+
+        # Callback: Stop training when a monitored quantity has stopped improving
+        earlystopping = EarlyStopping(
+            monitor='val_loss', 
+            patience=30, verbose=1, 
+            restore_best_weights=True )
+        callbacks.append(earlystopping)
+
+        # Callback: Reduce lr when a monitored quantity has stopped improving
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+                                    patience=5, min_lr=1e-6,verbose=1)
+        #callbacks.append(reduce_lr)
+
+        # Callback: save weights after each epoch
+        modelcheckpoint = ModelCheckpoint(
+            os.path.join(log_weight_path, model_name + '_{}X.h5'.format(self.upscaling_factor)), 
+            monitor='val_loss', 
+            save_best_only=True, 
+            save_weights_only=True)
+        callbacks.append(modelcheckpoint)
+  
+        # Callback: test images plotting
+        if datapath_test is not None:
+            testplotting = LambdaCallback(
+                on_epoch_end=lambda epoch, logs: None if ((epoch+1) % print_frequency != 0 ) else plot_test_images(
+                    self.cisrdcnn,
+                    test_loader,
+                    datapath_test,
+                    log_test_path,
+                    epoch+1,
+                    name=model_name,
+                    channels=self.channels,
+                    colorspace=self.colorspace))
+        callbacks.append(testplotting)
+
+        #callbacks.append(TQDMCallback())
+
+        self.cisrdcnn.fit(
+            train_loader,
+            steps_per_epoch=steps_per_epoch,
+            epochs=epochs,
+            validation_data=validation_loader,
+            validation_steps=steps_per_validation,
+            callbacks=callbacks,
+            shuffle=True,
+            use_multiprocessing=False,
+            workers=workers
+        )
+
 
     def predict_dbcnn(self,
             lr_path = None,
@@ -410,6 +572,31 @@ class CISRDCNN():
             return 0
         return time_elapsed
     
+    def predict_cisrdcnn(self,
+            lr_path = None,
+            sr_path = None,
+            print_frequency = False,
+            qp = 8,
+            fps = None,
+            media_type = None,
+            gpu = False
+        ):
+        """ lr_videopath: path of video in low resoluiton
+            sr_videopath: path to output video 
+            print_frequency: print frequncy the time per frame and estimated time, if False no print 
+            crf: [0,51] QP parameter 0 is the best quality and 51 is the worst one
+            fps: framerate if None is use the same framerate of the LR video
+            media_type: type of media 'v' to video and 'i' to image
+        """
+        if(media_type == 'v'):
+            time_elapsed = restore.write_srvideo(self.cisrdcnn,lr_path,sr_path,self.upscaling_factor,print_frequency=print_frequency,crf=qp,fps=fps,gpu=gpu)
+        elif(media_type == 'i'):
+            time_elapsed = restore.write_sr_images(self.cisrdcnn, lr_imagepath=lr_path, sr_imagepath=sr_path,scale=self.upscaling_factor)
+        else:
+            print(">> Media type not defined or not suported!")
+            return 0
+        return time_elapsed
+    
     
 
 
@@ -421,7 +608,7 @@ def main():
 
     # Instantiate the TSRGAN object
     logging.info(">> Creating the CISRDCNN network")
-    cisrdcnn = CISRDCNN(height_lr=16, width_lr=16,lr=1e-3,upscaling_factor=2,channels=3,colorspace = 'RGB')
+    cisrdcnn = CISRDCNN(height_lr=16, width_lr=16,lr=1e-3,upscaling_factor=2,channels=3,colorspace = 'RGB',fulltrain = True)
     #cisrdcnn.load_weights(weights='../model/CISRDCNN_v1_2X.h5')
 
 
@@ -455,7 +642,7 @@ def main():
             i+=1 """
                 
 
-    cisrdcnn.train_uscnn(
+    cisrdcnn.train_cisrdcnn(
             epochs=10000,
             batch_size=32,
             steps_per_epoch=10,
