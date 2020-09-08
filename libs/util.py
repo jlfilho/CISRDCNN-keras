@@ -21,7 +21,7 @@ from losses import psnr2 as psnr
 
 class DataLoader(Sequence):
     def __init__(self, datapath, batch_size, height_hr, width_hr, 
-         scale, crops_per_image, media_type,channels=3,colorspace='RGB'):
+         scale, crops_per_image, media_type,channels=3,colorspace='RGB',stage=None,qf=30):
         """        
         :param string datapath: filepath to training images
         :param int height_hr: Height of high-resolution images
@@ -45,6 +45,8 @@ class DataLoader(Sequence):
         self.media_type  = media_type
         self.time_step=1
         self.total_imgs = None
+        self.stage = stage
+        self.qf=qf
         
         # Options for resizing
         self.options = [Image.NEAREST, Image.BILINEAR, Image.BICUBIC, Image.LANCZOS]
@@ -180,7 +182,7 @@ class DataLoader(Sequence):
     def __getitem__(self, idx):
         return self.load_batch(idx=idx)   
 
-    def compression_artefacts(self,img=None,qf=10):
+    def compression_artefacts(self,img=None,qf=30):
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), qf]
         _, encimg = cv2.imencode('.jpg', img, encode_param)
         decimg = cv2.imdecode(encimg,cv2.IMREAD_COLOR)      
@@ -329,26 +331,22 @@ class DataLoader(Sequence):
                     if img_paths is not None and len(imgs_hr) == len(img_paths):
                         break   
 
-                    lr_shape = (int(img_hr.shape[1]/self.scale), int(img_hr.shape[0]/self.scale))  
                     #img_lr = cv2.resize(cv2.GaussianBlur(img_hr,(5,5),cv2.BORDER_DEFAULT),lr_shape, interpolation = cv2.INTER_CUBIC)
-                    #img_lr = cv2.resize(cv2.medianBlur(img_hr,5),lr_shape, interpolation = cv2.INTER_CUBIC)
-                    img_lr = cv2.resize(self.compression_artefacts(img_hr),lr_shape, interpolation = cv2.INTER_CUBIC)
+                    #img_lr = cv2.resize(cv2.medianBlur(img_hr,5),lr_shape, interpolation = cv2.INTER_CUBIC)  
+                    
 
+                    lr_shape = (int(img_hr.shape[1]/self.scale), int(img_hr.shape[0]/self.scale))  
+                    if(self.stage=='dbcnn'):
+                        img_hr = cv2.resize(img_hr,lr_shape, interpolation = cv2.INTER_CUBIC)
+                        #img_lr = cv2.resize(cv2.GaussianBlur(img_hr,(3,3),cv2.BORDER_DEFAULT),lr_shape, interpolation = cv2.INTER_CUBIC)
+                        img_lr = cv2.resize(img_hr,lr_shape, interpolation = cv2.INTER_CUBIC)
+                        img_lr = self.compression_artefacts(img_lr,qf=self.qf)
+                    else:
+                        #img_lr = cv2.resize(cv2.GaussianBlur(img_hr,(3,3),cv2.BORDER_DEFAULT),lr_shape, interpolation = cv2.INTER_CUBIC)
+                        img_lr = cv2.resize(img_hr,lr_shape, interpolation = cv2.INTER_CUBIC)
+                        img_lr = self.compression_artefacts(img_lr,qf=self.qf)
+                        #img_lr = cv2.resize(self.compression_artefacts(img_hr,qf=self.qf),lr_shape, interpolation = cv2.INTER_CUBIC)
 
-                    # For LR, do bicubic downsampling
-                    #lr_shape = (int(img_hr.shape[1]/self.scale), int(img_hr.shape[0]/self.scale))  
-                    #hr_shape = (img_hr.shape[1], img_hr.shape[0]) 
-                    
-                    # img_lr = Image.fromarray(img_hr.astype(np.uint8))
-                    # method = Image.BICUBIC if bicubic else choice(self.options)
-                    # img_lr = img_lr.resize(lr_shape, method)
-                    # img_lr = np.array(img_lr.resize(hr_shape, method))
-                    
-                    #img_lr = cv2.resize(img_hr,lr_shape, interpolation = cv2.INTER_CUBIC)
-                    #img_lr = cv2.resize(img_lr,hr_shape, interpolation = cv2.INTER_CUBIC)
-                    
-                    #img_lr = imresize(img_hr, lr_shape, interp='bicubic')
-                    #img_lr = imresize(img_lr, hr_shape, interp='bicubic')
 
                     
                     # Scale color values
@@ -356,7 +354,7 @@ class DataLoader(Sequence):
                     img_lr = self.scale_lr_imgs(img_lr)
 
                     # Store images
-                    #print(img_hr[6:-6,6:-6,:self.channels].shape,img_lr[:,:,:self.channels].shape)
+                    #print(img_hr[:,:,:self.channels].shape,img_lr[:,:,:self.channels].shape)
                     #imgs_hr.append(img_hr[6:-6,6:-6,:self.channels])
                     imgs_hr.append(img_hr[:,:,:self.channels])
                     imgs_lr.append(img_lr[:,:,:self.channels])
